@@ -41,7 +41,11 @@ This flow demonstrates a complete serverless event-driven architecture starting 
 
 ### Current Implementation Status
 
-Currently, each function is implemented independently and can be tested separately. The integration between functions to achieve the end-to-end flow described above will be implemented in future updates.
+Currently, the functions have been partially integrated:
+
+- HttpTrigger_Orchestrate_Main now calls other functions in sequence, orchestrating part of the workflow
+- Each function can still be tested individually 
+- Full end-to-end integration with the Service Bus trigger will be implemented in future updates
 
 ## 3. Prerequisites
 
@@ -78,7 +82,7 @@ For comprehensive setup instructions, follow the [official Microsoft guide for l
 ### Initial Setup:
 
 1. Clone this repository
-2. Update the `local.settings.json` file with your connection strings:
+2. Create your own `local.settings.json` file with your connection strings in the root of the PoCSample.FunctionApp project folder:
    ```json
    {
      "IsEncrypted": false,
@@ -87,12 +91,35 @@ For comprehensive setup instructions, follow the [official Microsoft guide for l
        "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
        "PocSampleServiceBus": "YOUR_SERVICE_BUS_CONNECTION_STRING",
        "StorageConnectionString": "YOUR_STORAGE_ACCOUNT_CONNECTION_STRING"
-     }
+     },
+  "Host": {
+    "LocalHttpPort": 7072,
+    "CORS": "*",
+    "CORSCredentials": false
+  }
    }
    ```
-3. Build the project: `dotnet build`
+1. Build the project: `dotnet build`
 
 ### Running Individual Functions:
+
+#### HttpTrigger_Orchestrate_Main
+
+This function orchestrates multiple function calls in sequence:
+
+1. Start the function app locally
+2. Send a GET request to: `http://localhost:7072/api/HttpTrigger_Orchestrate_Main`
+3. This will trigger the following sequence:
+   - Generate a unique correlation ID for the entire process
+   - Call the HttpTrigger_Utility_GetConfig function to retrieve configuration
+   - Call the HttpTrigger_Utility_CreateCSV function with the generated correlation ID
+4. Check the terminal output to observe:
+   - The generated correlation ID
+   - Logs for each step of the orchestrated process
+   - Success/failure status of each function call
+5. The function returns the correlation ID that can be used to track the process
+
+This function demonstrates how to coordinate multiple Azure Functions in a workflow, passing context (via correlation ID) between them to maintain process state across independent, stateless functions.
 
 #### HttpTrigger_Utility_GetConfig
 
@@ -107,9 +134,26 @@ This function demonstrates reading configuration values:
 This function generates CSV data and sends it to a storage queue:
 
 1. Start the function app locally
-2. Send a GET request with correlation ID on your URL: `http://localhost:7072/api/HttpTrigger_Utility_CreateCSV?correlationId=test123` If you dont provide a correlationId it will generate a random one.
+2. Send a GET request with correlation ID: `http://localhost:7072/api/HttpTrigger_Utility_CreateCSV?correlationId=test123` 
+   - If you don't provide a correlationId, it will generate a random one
 3. In the Azure Portal, navigate to your storage account, select "Queues", then "outbound-csv-queue"
 4. You should see messages containing your correlation ID and the generated data
+
+#### ServiceBusQueueTrigger_Processor
+
+This function processes messages from a Service Bus queue:
+
+1. Start the function app locally
+2. Use the Azure Portal or Service Bus Explorer to send a test message to the "inbound_queue"
+3. Observe the terminal output showing the received message
+
+#### HttpTrigger_Test_NotificationReceiver
+
+This function simulates receiving notifications:
+
+1. Start the function app locally
+2. Send a GET request with a test message: `http://localhost:7072/api/HttpTrigger_Test_NotificationReceiver?message=TestNotification`
+3. Check the terminal output for "NOTIFICATION RECEIVED: TestNotification"
 
 #### HttpTrigger_Outbound_Email
 
@@ -124,17 +168,21 @@ This function processes queue messages by correlation ID and creates blobs:
    - The blob content should contain all queue messages with matching correlation ID
 5. Check the terminal output for notification delivery confirmation
 
-#### HttpTrigger_Test_NotificationReceiver
+### Testing the Partial Orchestration Flow:
 
-This function simulates receiving notifications:
+You can now test a partially integrated flow by:
 
-1. Start the function app locally
-2. Send a GET request with a test message: `http://localhost:7072/api/HttpTrigger_Test_NotificationReceiver?message=TestNotification`
-3. Check the terminal output for "NOTIFICATION RECEIVED: TestNotification"
+1. Starting the function app locally
+2. Calling the `HttpTrigger_Orchestrate_Main` function 
+3. Observing as it generates a correlation ID and calls the utility functions
+4. Checking the storage queue for messages with the correlation ID
+5. Manually calling `HttpTrigger_Outbound_Email` with the same correlation ID to complete the flow
+
+This demonstrates the orchestration capabilities of Azure Functions without requiring a Service Bus message to initiate the process.
 
 ### Future End-to-End Flow Testing:
 
-Once the integration between functions is implemented, the full flow will be testable by:
+Once the full integration between functions is implemented, the complete flow will be testable by:
 
 1. Sending a message to the Service Bus "inbound_queue" 
 2. Watching as the ServiceBusQueueTrigger_Processor validates the message and calls HttpTrigger_Orchestrate_Main
